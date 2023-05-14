@@ -1,0 +1,49 @@
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import *
+from pyspark.sql.types import ArrayType, StringType
+from pyspark.ml.feature import StopWordsRemover
+import os
+
+spark = SparkSession.builder \
+    .appName("MyApp") \
+    .config("spark.some.config.option", "some-value") \
+    .getOrCreate()
+
+# Read file from S3 bucket
+df = spark.read.format("csv").option("header", "true").load("s3://inputpronew/.csv")
+
+# Get the file name and use it as the DataFrame name
+df = df.withColumn("file_name", input_file_name())
+file_name = os.path.basename(df.select("file_name").first()[0]).split(".")[0]
+globals()[file_name] = df
+
+# Create two new columns based on the values in the 'duration' column
+df = df.withColumn("min_duration", when(df.duration.contains("min"), regexp_replace(df.duration, " min", "")).otherwise(None))
+df = df.withColumn("sesone_duration", when(df.duration.contains("sesone"), regexp_replace(df.duration, " sesone", "")).otherwise(None))
+
+# Cast the new columns to integer data type
+df = df.withColumn("min_duration", df.min_duration.cast("int"))
+df = df.withColumn("sesone_duration", df.sesone_duration.cast("int"))
+ 
+# Remove null values from 'title' column
+df = df.filter(col("title").isNotNull())
+
+# Replace all other null values with "not available"
+df = df.fillna("not available")
+
+# Change data type of 'date_added' column to date
+df = df.withColumn("date_added", to_date(col("date_added"), "yyyy-MM-dd"))
+
+# Change data type of 'release_year' column to int
+df = df.withColumn("release_year", col("release_year").cast("int"))
+
+
+# Write cleaned file to another S3 bucket with the same name as the input file
+output_bucket = "mayur786" # Change this to the name of your output S3 bucket
+output_path = f"s3://{output_bucket}/{file_name}.csv"
+df.write.format("csv").option("header", "true").save(output_path)
+
+
+
+
+spark.stop()
